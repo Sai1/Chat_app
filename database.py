@@ -11,22 +11,65 @@ def initialize_db():
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            id INT AUTO_INCREMENT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             username VARCHAR(255) NOT NULL UNIQUE,
             password VARCHAR(255) NOT NULL
         )
     """)
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rooms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_name VARCHAR(255) NOT NULL UNIQUE
+        )
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS messages (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            username VARCHAR(255),
-            message TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_id INTEGER,
+            sender_username VARCHAR(255) NOT NULL,
+            recipient_username VARCHAR(255),
+            message TEXT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (room_id) REFERENCES rooms(id),
+            FOREIGN KEY (sender_username) REFERENCES users(username),
+            FOREIGN KEY (recipient_username) REFERENCES users(username)
         )
     """)
     conn.commit()
     cursor.close()
     conn.close()
+
+def room_exists(room_name):
+    try:
+        conn = create_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM rooms WHERE room_name=?", (room_name,))
+        room = cursor.fetchone()
+        print("room:", room)  # Debugging output
+        cursor.close()
+        conn.close()
+        return room is not None
+    except Exception as e:
+        print(f"Error checking room existence: {e}")
+        return False
+
+
+def create_room(room_name):
+    try:
+        conn = create_connection()
+        cursor = conn.cursor()
+        print("before")
+        cursor.execute("INSERT INTO rooms (room_name) VALUES (?)", (room_name,))
+        print("after")
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error creating room: {e}")
+        return False
+
+
 
 def user_exists(username):
     conn = create_connection()
@@ -64,20 +107,59 @@ def authenticate_user(username,password):
         return True
     return False
 
-def save_message(username, message):
+def save_message(room_name, username, message):
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO messages (username, message) VALUES (?, ?)", (username, message))
+    
+    cursor.execute("SELECT id FROM rooms WHERE room_name=?", (room_name,))
+    room_id_tuple = cursor.fetchone()
+    
+    if room_id_tuple:
+        (room_id,) = room_id_tuple
+        cursor.execute("INSERT INTO messages (room_id, sender_username, message) VALUES (?, ?, ?)", (room_id, username, message))
+        conn.commit()
+    
+    cursor.close()
+    conn.close()
+
+def get_message_history(room_name):
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id FROM rooms WHERE room_name=?", (room_name,))
+    room_id_tuple = cursor.fetchone()
+    
+    if room_id_tuple:
+        (room_id,) = room_id_tuple
+        cursor.execute("SELECT sender_username, message, timestamp FROM messages WHERE room_id=? ORDER BY timestamp", (room_id,))
+        messages = cursor.fetchall()
+    else:
+        messages = []
+    
+    cursor.close()
+    conn.close()
+    return messages
+
+def save_private_message(sender_username, recipient_username, message):
+    conn = create_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO messages (sender_username, recipient_username, message) VALUES (?, ?, ?)", (sender_username, recipient_username, message))
     conn.commit()
     cursor.close()
     conn.close()
 
-def get_message_history():
+def get_private_messages(sender_username, recipient_username):
     conn = create_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT username, message, timestamp FROM messages ORDER BY timestamp")
+    cursor.execute("""
+        SELECT sender_username, message, timestamp
+        FROM messages
+        WHERE (sender_username=? AND recipient_username=?) OR (sender_username=? AND recipient_username=?)
+        ORDER BY timestamp
+    """, (sender_username, recipient_username, recipient_username, sender_username))
     messages = cursor.fetchall()
     cursor.close()
     conn.close()
     return messages
+
 
